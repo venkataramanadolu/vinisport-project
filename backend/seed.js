@@ -82,6 +82,16 @@ async function seedData() {
     }
     console.log("Starting VINISPORT Idempotent Demo Seeder...");
 
+    // Fix existing leagues that might be missing newly required fields
+    await League.updateMany(
+      { $or: [ { maximumTeams: { $exists: false } }, { maximumTeams: null } ] },
+      { $set: { maximumTeams: 30 } }
+    );
+    await League.updateMany(
+      { $or: [ { matchDurationMinutes: { $exists: false } }, { matchDurationMinutes: null } ] },
+      { $set: { matchDurationMinutes: 45 } }
+    );
+
     // 1. Get or Create Admin System User
     let admin = await User.findOne({ email: "vinisportadmin@gmail.com" });
     if (!admin) {
@@ -113,11 +123,12 @@ async function seedData() {
 
         // Check if League already exists
         let league = await League.findOne({ leagueName });
+        
+        const startDate = new Date();
+        const endDate = new Date();
+        endDate.setDate(startDate.getDate() + 90);
+        
         if (!league) {
-          const startDate = new Date();
-          const endDate = new Date();
-          endDate.setDate(startDate.getDate() + 90);
-
           league = await League.create({
             leagueName,
             sport: sportKey,

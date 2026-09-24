@@ -369,22 +369,29 @@ router.put("/profile", protect, async (req, res) => {
       }
     }
 
-    const updateData = {
-      fullName: String(fullName || "").trim(),
-      gender: String(gender || "").trim(),
-      dob: dob ? new Date(dob) : req.user.dob,
+    let updateData = {};
 
-      age: Number(age),
-      mobileNumber: String(mobileNumber || "").trim(),
-      city: String(city || "").trim(),
-      state: String(state || "").trim(),
-      country: String(country || "").trim(),
-      countryCode: String(countryCode || "").trim(),
-      interestedSport: String(interestedSport || "").trim(),
-      experience: String(experience || "").trim(),
-      socialMediaLinks: String(socialMediaLinks || "").trim(),
-      ...(String(profilePhoto || "").trim() ? { profilePhoto: String(profilePhoto).trim() } : {}),
-    };
+    if (isSkillUpdate) {
+      updateData = {
+        sportsSkills: sportsSkills || {}
+      };
+    } else {
+      updateData = {
+        fullName: String(fullName || "").trim(),
+        gender: String(gender || "").trim(),
+        dob: dob ? new Date(dob) : req.user.dob,
+        age: Number(age),
+        mobileNumber: String(mobileNumber || "").trim(),
+        city: String(city || "").trim(),
+        state: String(state || "").trim(),
+        country: String(country || "").trim(),
+        countryCode: String(countryCode || "").trim(),
+        interestedSport: String(interestedSport || "").trim(),
+        experience: String(experience || "").trim(),
+        socialMediaLinks: String(socialMediaLinks || "").trim(),
+        ...(String(profilePhoto || "").trim() ? { profilePhoto: String(profilePhoto).trim() } : {}),
+      };
+    }
 
     const updatedUser = await User.findOneAndUpdate(
       { email: loggedInEmail },

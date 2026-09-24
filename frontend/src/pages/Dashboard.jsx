@@ -23,6 +23,45 @@ const Logo = () => (
   </div>
 );
 
+const SPORT_SKILLS_CONFIG = {
+  volleyball: [
+    { key: "serving", label: "Serving" },
+    { key: "passing", label: "Passing" },
+    { key: "setting", label: "Setting" },
+    { key: "spiking", label: "Spiking" },
+    { key: "blocking", label: "Blocking" },
+    { key: "receiving", label: "Receiving" },
+    { key: "attacking", label: "Attacking" },
+    { key: "defense", label: "Defense" },
+    { key: "footwork", label: "Footwork" },
+    { key: "courtAwareness", label: "Court Awareness" },
+  ],
+  cricket: [
+    { key: "batting", label: "Batting" },
+    { key: "bowling", label: "Bowling" },
+    { key: "fielding", label: "Fielding" },
+    { key: "catching", label: "Catching" },
+    { key: "throwing", label: "Throwing" },
+    { key: "runningBetweenWickets", label: "Running Between Wickets" },
+    { key: "battingTechnique", label: "Batting Technique" },
+    { key: "bowlingAccuracy", label: "Bowling Accuracy" },
+    { key: "gameAwareness", label: "Game Awareness" },
+    { key: "fitness", label: "Fitness" },
+  ],
+  tennis: [
+    { key: "forehand", label: "Forehand" },
+    { key: "backhand", label: "Backhand" },
+    { key: "serve", label: "Serve" },
+    { key: "returnOfServe", label: "Return of Serve" },
+    { key: "volley", label: "Volley" },
+    { key: "smash", label: "Smash" },
+    { key: "dropShot", label: "Drop Shot" },
+    { key: "lob", label: "Lob" },
+    { key: "footwork", label: "Footwork" },
+    { key: "courtAwareness", label: "Court Awareness" },
+  ]
+};
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -1559,7 +1598,7 @@ export default function Dashboard() {
                   Selected Sports
                 </label>
                 <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
-                  {["badminton"].map(sport => (
+                  {["badminton", "volleyball", "cricket", "tennis"].map(sport => (
                     <button
                       key={sport}
                       onClick={() => handleSportToggle(sport)}
@@ -1670,37 +1709,95 @@ export default function Dashboard() {
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
 
+              {/* OTHER SPORTS SKILLS */}
+              {["volleyball", "cricket", "tennis"].map(sport => {
+                if (!selectedSports.includes(sport)) return null;
+                return (
+                  <div key={sport} style={{
+                    border: "1px solid #e5e7eb",
+                    borderRadius: "12px",
+                    background: "#f8fafc",
+                    padding: "24px",
+                    marginTop: "24px",
+                  }}>
+                    <h3 style={{
+                      fontSize: "18px",
+                      fontWeight: 700,
+                      color: "#111827",
+                      marginBottom: "20px",
+                      textTransform: "uppercase"
+                    }}>
+                      {sport} Skills
+                    </h3>
+                    <div style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                      gap: "16px",
+                    }}>
+                      {SPORT_SKILLS_CONFIG[sport].map(skill => (
+                        <div key={skill.key}>
+                          <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>
+                            {skill.label}
+                          </label>
+                          <select
+                            value={sportsSkills[sport]?.[skill.key] || ""}
+                            onChange={(e) => handleSkillChange(sport, skill.key, e.target.value)}
+                            style={{
+                              width: "100%",
+                              padding: "10px 12px",
+                              border: "1px solid #d1d5db",
+                              borderRadius: "8px",
+                              fontSize: "14px",
+                              background: "white",
+                              outline: "none",
+                            }}
+                          >
+                            <option value="">Select Level</option>
+                            <option value="Beginner">Beginner</option>
+                            <option value="Intermediate">Intermediate</option>
+                            <option value="Advanced">Advanced</option>
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* SAVE BUTTON SECTION */}
+              {selectedSports.length > 0 && (
+                <div style={{ marginTop: "24px" }}>
                   {skillsUpdateError && (
-                    <p style={{ marginTop: "16px", color: "#dc2626", fontSize: "13px", fontWeight: 500 }}>
+                    <p style={{ marginBottom: "16px", color: "#dc2626", fontSize: "13px", fontWeight: 500 }}>
                       {skillsUpdateError}
                     </p>
                   )}
                   {skillsUpdateSuccess && (
-                    <p style={{ marginTop: "16px", color: "#15803d", fontSize: "13px", fontWeight: 500 }}>
+                    <p style={{ marginBottom: "16px", color: "#15803d", fontSize: "13px", fontWeight: 500 }}>
                       {skillsUpdateSuccess}
                     </p>
                   )}
-
-                  <div style={{ marginTop: "20px" }}>
-                    <button
-                      onClick={handleSkillsUpdateSubmit}
-                      style={{
-                        padding: "10px 18px",
-                        border: "none",
-                        borderRadius: "8px",
-                        fontSize: "14px",
-                        fontWeight: 600,
-                        color: "white",
-                        background: "#0369a1",
-                        cursor: "pointer",
-                      }}
-                    >
-                      Save Skills
-                    </button>
-                  </div>
+                  <button
+                    onClick={handleSkillsUpdateSubmit}
+                    style={{
+                      padding: "10px 18px",
+                      border: "none",
+                      borderRadius: "8px",
+                      fontSize: "14px",
+                      fontWeight: 600,
+                      color: "white",
+                      background: "#0369a1",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Save Skills
+                  </button>
                 </div>
               )}
+
             </div>
             </>
           ) : activeSection === "matches" ? (
