@@ -293,6 +293,8 @@ router.get("/me", protect, async (req, res) => {
       socialMediaLinks: req.user.socialMediaLinks || "",
       profilePhoto: req.user.profilePhoto || "",
       sportsSkills: req.user.sportsSkills || {},
+      homeClubId: req.user.homeClubId || null,
+      homeClubName: req.user.homeClubName || "",
       createdAt: req.user.createdAt,
     },
   });
@@ -346,7 +348,9 @@ router.put("/profile", protect, async (req, res) => {
       socialMediaLinks,
       profilePhoto,
       sportsSkills,
+      homeClubId,
       isSkillUpdate,
+      isHomeClubUpdate,
     } = req.body;
 
     const loggedInEmail = (req.user.email || "").toLowerCase();
@@ -359,7 +363,7 @@ router.put("/profile", protect, async (req, res) => {
       });
     }
 
-    if (!isSkillUpdate) {
+    if (!isSkillUpdate && !isHomeClubUpdate) {
       const requiredFields = [fullName, gender, dob, age, city, state, country, interestedSport, experience];
       if (requiredFields.some((value) => !String(value ?? "").trim())) {
         return res.status(400).json({
@@ -372,11 +376,52 @@ router.put("/profile", protect, async (req, res) => {
     let updateData = {};
 
     if (isSkillUpdate) {
-      updateData = {
-        sportsSkills: sportsSkills || {}
-      };
+      const setOperator = {};
+      if (sportsSkills && typeof sportsSkills === "object") {
+        for (const [sport, skills] of Object.entries(sportsSkills)) {
+          if (skills && typeof skills === "object") {
+            for (const [skill, level] of Object.entries(skills)) {
+              if (level === "") {
+                setOperator[`sportsSkills.${sport}.${skill}`] = level;
+              } else if (skill === "playingHand") {
+                if (["Right Hand", "Left Hand"].includes(level)) {
+                  setOperator[`sportsSkills.${sport}.${skill}`] = level;
+                } else {
+                  return res.status(400).json({ success: false, message: `Invalid playing hand: ${level}` });
+                }
+              } else {
+                if (["Beginner", "Intermediate", "Advanced"].includes(level)) {
+                  setOperator[`sportsSkills.${sport}.${skill}`] = level;
+                } else {
+                  return res.status(400).json({ success: false, message: `Invalid skill level for ${sport} ${skill}: ${level}` });
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      if (Object.keys(setOperator).length > 0) {
+        updateData = { $set: setOperator };
+      }
+    } else if (isHomeClubUpdate) {
+      // Dedicated home club update — no other fields required
+      if (homeClubId === null || homeClubId === "" || homeClubId === undefined) {
+        updateData.homeClubId = null;
+        updateData.homeClubName = "";
+      } else {
+        const clubExists = await Club.findById(homeClubId);
+        if (!clubExists) {
+          return res.status(400).json({
+            success: false,
+            message: "Selected Home Club does not exist.",
+          });
+        }
+        updateData.homeClubId = homeClubId;
+        updateData.homeClubName = clubExists.clubName;
+      }
     } else {
-      updateData = {
+      const $setFields = {
         fullName: String(fullName || "").trim(),
         gender: String(gender || "").trim(),
         dob: dob ? new Date(dob) : req.user.dob,
@@ -391,6 +436,29 @@ router.put("/profile", protect, async (req, res) => {
         socialMediaLinks: String(socialMediaLinks || "").trim(),
         ...(String(profilePhoto || "").trim() ? { profilePhoto: String(profilePhoto).trim() } : {}),
       };
+
+      if (sportsSkills && typeof sportsSkills === "object") {
+        $setFields.sportsSkills = sportsSkills;
+      }
+
+      if (homeClubId !== undefined) {
+        if (homeClubId === null || homeClubId === "") {
+          $setFields.homeClubId = null;
+          $setFields.homeClubName = "";
+        } else {
+          const clubExists = await Club.findById(homeClubId);
+          if (!clubExists) {
+            return res.status(400).json({
+              success: false,
+              message: "Selected Home Club does not exist.",
+            });
+          }
+          $setFields.homeClubId = homeClubId;
+          $setFields.homeClubName = clubExists.clubName;
+        }
+      }
+
+      updateData = { $set: $setFields };
     }
 
     const updatedUser = await User.findOneAndUpdate(
@@ -429,6 +497,8 @@ router.put("/profile", protect, async (req, res) => {
         socialMediaLinks: updatedUser.socialMediaLinks || "",
         profilePhoto: updatedUser.profilePhoto || "",
         sportsSkills: updatedUser.sportsSkills || {},
+        homeClubId: updatedUser.homeClubId || null,
+        homeClubName: updatedUser.homeClubName || "",
         createdAt: updatedUser.createdAt,
       },
     });
@@ -677,11 +747,32 @@ router.get("/dashboard/stats", protect, async (req, res) => {
     const user = req.user;
     const userId = user._id;
 
-    // Read stats directly from the user document
-    const gamesPlayed = user.gamesPlayed || 0;
-    const wins = user.wins || 0;
-    const losses = user.losses || 0;
-    const rating = user.rating || 1200;
+    let gamesPlayed = 0;
+    let wins = 0;
+    let losses = 0;
+    let totalRating = 0;
+    let sportCount = 0;
+
+    if (user.sportStats && Object.keys(user.sportStats).length > 0) {
+      for (const sport in user.sportStats) {
+        const stat = user.sportStats[sport];
+        gamesPlayed += (stat.gamesPlayed || 0);
+        wins += (stat.wins || 0);
+        losses += (stat.losses || 0);
+        if (stat.rating) {
+          totalRating += stat.rating;
+          sportCount += 1;
+        }
+      }
+    } else {
+      gamesPlayed = user.gamesPlayed || 0;
+      wins = user.wins || 0;
+      losses = user.losses || 0;
+      totalRating = user.rating || 1200;
+      sportCount = 1;
+    }
+
+    const rating = sportCount > 0 ? Math.round(totalRating / sportCount) : 1200;
     const winRate = gamesPlayed > 0
       ? Math.round((wins / gamesPlayed) * 1000) / 10
       : 0;
@@ -778,12 +869,12 @@ router.get("/dashboard/sport-stats", protect, async (req, res) => {
       
       const sportLeaguesCount = sportLeagues.length;
       
-      // Global stats only apply to the primary sport to avoid merging/duplication
-      const isPrimary = (sportName === primarySport);
-      const gamesPlayed = isPrimary ? (user.gamesPlayed || 0) : 0;
-      const wins = isPrimary ? (user.wins || 0) : 0;
-      const losses = isPrimary ? (user.losses || 0) : 0;
-      const rating = user.rating || 1200; // Rating is globally explicitly defined
+      const stats = (user.sportStats && user.sportStats[sportName]) ? user.sportStats[sportName] : null;
+
+      const gamesPlayed = stats ? (stats.gamesPlayed || 0) : 0;
+      const wins = stats ? (stats.wins || 0) : 0;
+      const losses = stats ? (stats.losses || 0) : 0;
+      const rating = stats && stats.rating ? stats.rating : (user.rating || 1200);
       
       const winRate = gamesPlayed > 0 
         ? Math.round((wins / gamesPlayed) * 1000) / 10 

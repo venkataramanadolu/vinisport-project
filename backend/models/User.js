@@ -110,6 +110,16 @@ const userSchema = new mongoose.Schema(
       ref: "Club",
       default: null,
     },
+    homeClubId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Club",
+      default: null,
+    },
+    homeClubName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     joinedClubs: [
       {
         clubId: {
@@ -161,6 +171,10 @@ const userSchema = new mongoose.Schema(
       default: 0,
     },
     sportsSkills: {
+      type: Object,
+      default: {},
+    },
+    sportStats: {
       type: Object,
       default: {},
     },

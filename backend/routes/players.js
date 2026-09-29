@@ -102,6 +102,24 @@ router.get("/clubs", async (req, res) => {
   }
 });
 
+// @route   GET /api/players/registered-clubs
+// @desc    Get all registered clubs with IDs for Home Club selection
+// @access  Public / Optional Auth
+router.get("/registered-clubs", async (req, res) => {
+  try {
+    const clubs = await Club.find({}).select("clubName").sort({ clubName: 1 });
+    res.status(200).json({
+      success: true,
+      clubs: clubs.map(c => ({ id: c._id, name: c.clubName })),
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch registered clubs",
+    });
+  }
+});
+
 // @route   GET /api/players/leagues
 // @desc    Get all leagues for filter dropdown (sport-wise)
 // @access  Public / Optional Auth

@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { Country, State } from "country-state-city";
 import { SPORTS_CONFIG } from "../config/sports";
 import SportStatsSection from "../components/SportStatsSection";
@@ -62,6 +62,28 @@ const SPORT_SKILLS_CONFIG = {
   ]
 };
 
+const mapUserToProfileDetails = (incomingUser) => {
+  const countryOptions = Country.getAllCountries();
+  const matchedCountry = countryOptions.find((country) => country.name === incomingUser?.country);
+
+  return {
+    fullName: incomingUser?.fullName || `${incomingUser?.firstName || ""} ${incomingUser?.lastName || ""}`.trim(),
+    gender: incomingUser?.gender || "",
+    dob: incomingUser?.dob ? new Date(incomingUser.dob).toISOString().slice(0, 10) : "",
+    age: incomingUser?.age ? String(incomingUser.age) : "",
+    mobileNumber: incomingUser?.mobileNumber || "",
+    city: incomingUser?.city || "",
+    state: incomingUser?.state || "",
+    country: incomingUser?.countryCode || matchedCountry?.isoCode || "",
+    interestedSport: incomingUser?.interestedSport || "",
+    experience: incomingUser?.experience || "",
+    socialMediaLinks: incomingUser?.socialMediaLinks || "",
+    profilePhoto: null,
+    profilePhotoPreview: incomingUser?.profilePhoto || "",
+    homeClubId: incomingUser?.homeClubId || "",
+  };
+};
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -98,8 +120,8 @@ export default function Dashboard() {
   const [statsError, setStatsError] = useState("");
   const [sportsSkills, setSportsSkills] = useState({});
   const [selectedSports, setSelectedSports] = useState([]);
-  const [skillsUpdateSuccess, setSkillsUpdateSuccess] = useState("");
-  const [skillsUpdateError, setSkillsUpdateError] = useState("");
+  const [savedProfileState, setSavedProfileState] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
   const [profileDetails, setProfileDetails] = useState({
     fullName: "",
     gender: "",
@@ -114,17 +136,35 @@ export default function Dashboard() {
     socialMediaLinks: "",
     profilePhoto: null,
     profilePhotoPreview: "",
+    homeClubId: "",
   });
+  const [registeredClubs, setRegisteredClubs] = useState([]);
+  const [loadingClubs, setLoadingClubs] = useState(false);
+
+  const getComparableState = (details, sports, skills) => {
+    // eslint-disable-next-line no-unused-vars
+    const { profilePhoto, profilePhotoPreview, ...restDetails } = details;
+    return {
+      profileDetails: restDetails,
+      selectedSports: [...sports].sort(),
+      sportsSkills: skills
+    };
+  };
+
+  const isDirty = useMemo(() => {
+    if (!savedProfileState) return false;
+    const currentState = getComparableState(profileDetails, selectedSports, sportsSkills);
+    const savedState = getComparableState(savedProfileState.profileDetails, savedProfileState.selectedSports, savedProfileState.sportsSkills);
+    return JSON.stringify(currentState) !== JSON.stringify(savedState);
+  }, [profileDetails, selectedSports, sportsSkills, savedProfileState]);
   const options = [
 
     "This event is public and anyone can sign up through UBR",
     "Players must register with organizer directly",
     "Automatically open checkin 30 minutes before event starts",
     "Players that sign up/check in when event is at capacity are placed on the waiting list",
-    "All games in this event will be unrated",
     "Fully mixed mixer (matchups ignore ratings, anyone can be paired with anyone)",
-
-  ]
+  ];
   const countryOptions = Country.getAllCountries();
   const stateOptions = profileDetails.country
     ? State.getStatesOfCountry(profileDetails.country)
@@ -135,25 +175,7 @@ export default function Dashboard() {
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
 
-  const mapUserToProfileDetails = (incomingUser) => {
-    const matchedCountry = countryOptions.find((country) => country.name === incomingUser?.country);
 
-    return {
-      fullName: incomingUser?.fullName || `${incomingUser?.firstName || ""} ${incomingUser?.lastName || ""}`.trim(),
-      gender: incomingUser?.gender || "",
-      dob: incomingUser?.dob ? new Date(incomingUser.dob).toISOString().slice(0, 10) : "",
-      age: incomingUser?.age ? String(incomingUser.age) : "",
-      mobileNumber: incomingUser?.mobileNumber || "",
-      city: incomingUser?.city || "",
-      state: incomingUser?.state || "",
-      country: incomingUser?.countryCode || matchedCountry?.isoCode || "",
-      interestedSport: incomingUser?.interestedSport || "",
-      experience: incomingUser?.experience || "",
-      socialMediaLinks: incomingUser?.socialMediaLinks || "",
-      profilePhoto: null,
-      profilePhotoPreview: incomingUser?.profilePhoto || "",
-    };
-  };
 
   useEffect(() => {
     const urlParams = new URLSearchParams(location.search);
@@ -196,13 +218,22 @@ export default function Dashboard() {
         }
 
         setUser(data.user);
-        setSportsSkills(data.user.sportsSkills || {});
-        setSelectedSports(Object.keys(data.user.sportsSkills || {}));
-        setProfileDetails((prev) => ({
-          ...prev,
-          ...mapUserToProfileDetails(data.user),
-        }));
-      } catch (error) {
+        
+        const initialSportsSkills = data.user.sportsSkills || {};
+        const initialSelectedSports = Object.keys(data.user.sportsSkills || {});
+        
+        setSportsSkills(initialSportsSkills);
+        setSelectedSports(initialSelectedSports);
+        setProfileDetails((prev) => {
+          const initialProfileDetails = { ...prev, ...mapUserToProfileDetails(data.user) };
+          setSavedProfileState({
+            profileDetails: initialProfileDetails,
+            selectedSports: initialSelectedSports.sort(),
+            sportsSkills: initialSportsSkills
+          });
+          return initialProfileDetails;
+        });
+      } catch (_error) {
         localStorage.removeItem("token");
         navigate("/signin");
       } finally {
@@ -226,6 +257,24 @@ export default function Dashboard() {
 
     fetchCurrentUser(token);
   }, [navigate]);
+
+  useEffect(() => {
+    const fetchClubs = async () => {
+      try {
+        setLoadingClubs(true);
+        const response = await fetch(`${API_URL}/api/players/registered-clubs`);
+        const data = await response.json();
+        if (response.ok && data.success) {
+          setRegisteredClubs(data.clubs || []);
+        }
+      } catch (error) {
+        console.error("Failed to fetch clubs", error);
+      } finally {
+        setLoadingClubs(false);
+      }
+    };
+    fetchClubs();
+  }, []);
 
   useEffect(() => {
     const fetchDashboardStats = async () => {
@@ -561,7 +610,11 @@ export default function Dashboard() {
   };
 
   const handleUpdateSubmit = async (event) => {
-    event.preventDefault();
+    if (event && event.preventDefault) {
+      event.preventDefault();
+    }
+    
+    if (isSaving) return;
 
     const requiredFields = [
       profileDetails.fullName,
@@ -582,12 +635,25 @@ export default function Dashboard() {
     }
 
     try {
+      setIsSaving(true);
       const token = localStorage.getItem("token");
       if (!token) {
         setUpdateSuccess("");
         setUpdateError("Session expired. Please sign in again.");
+        setIsSaving(false);
         navigate("/signin");
         return;
+      }
+
+      // Basic validation for Badminton skills
+      if (selectedSports.includes("badminton")) {
+        const bd = sportsSkills.badminton || {};
+        if (!bd.playingHand) {
+          setUpdateError("Please select a Playing Hand for Badminton.");
+          setUpdateSuccess("");
+          setIsSaving(false);
+          return;
+        }
       }
 
       const selectedCountry = countryOptions.find((country) => country.isoCode === profileDetails.country);
@@ -613,6 +679,8 @@ export default function Dashboard() {
           experience: profileDetails.experience,
           socialMediaLinks: profileDetails.socialMediaLinks,
           profilePhoto: profileDetails.profilePhotoPreview,
+          homeClubId: profileDetails.homeClubId || null,
+          sportsSkills: sportsSkills
         }),
       });
 
@@ -623,17 +691,24 @@ export default function Dashboard() {
       }
 
       setUser(data.user);
-      setProfileDetails((prev) => ({
-        ...prev,
-        ...mapUserToProfileDetails(data.user),
-      }));
+      
+      const newSportsSkills = data.user.sportsSkills || {};
+      const newSelectedSports = Object.keys(data.user.sportsSkills || {});
+      
+      setSportsSkills(newSportsSkills);
+      setSelectedSports(newSelectedSports);
+      setProfileDetails((prev) => {
+        const newProfileDetails = { ...prev, ...mapUserToProfileDetails(data.user) };
+        setSavedProfileState({
+          profileDetails: newProfileDetails,
+          selectedSports: newSelectedSports.sort(),
+          sportsSkills: newSportsSkills
+        });
+        return newProfileDetails;
+      });
 
       setUpdateError("");
       setUpdateSuccess("Profile details updated successfully.");
-
-      setTimeout(() => {
-        setShowUpdateForm(false);
-      }, 1000);
 
       setTimeout(() => {
         setUpdateSuccess("");
@@ -641,6 +716,8 @@ export default function Dashboard() {
     } catch (error) {
       setUpdateSuccess("");
       setUpdateError(error.message || "Unable to update profile details.");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -664,51 +741,7 @@ export default function Dashboard() {
     });
   };
 
-  const handleSkillsUpdateSubmit = async () => {
-    try {
-      const token = localStorage.getItem("token");
-      if (!token) {
-        setSkillsUpdateError("Session expired. Please sign in again.");
-        return;
-      }
-      
-      // Basic validation for Badminton skills
-      if (selectedSports.includes("badminton")) {
-        const bd = sportsSkills.badminton || {};
-        if (!bd.playingHand) {
-          setSkillsUpdateError("Please select a Playing Hand for Badminton.");
-          setSkillsUpdateSuccess("");
-          return;
-        }
-      }
 
-      const response = await fetch(`${API_URL}/api/auth/profile`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          isSkillUpdate: true,
-          sportsSkills: sportsSkills
-        }),
-      });
-
-      const data = await response.json();
-      if (!response.ok || !data?.success) {
-        throw new Error(data?.message || "Failed to update skills");
-      }
-
-      setSportsSkills(data.user.sportsSkills || {});
-      setSkillsUpdateError("");
-      setSkillsUpdateSuccess("Skills successfully saved!");
-      
-      setTimeout(() => setSkillsUpdateSuccess(""), 3000);
-    } catch (error) {
-      setSkillsUpdateSuccess("");
-      setSkillsUpdateError("Unable to save your badminton skills. Please try again.");
-    }
-  };
 
   if (loading) {
     return (
@@ -1107,590 +1140,231 @@ export default function Dashboard() {
         }}>
           {activeSection === "profile" ? (
             <>
-            <div style={{
-              background: "white",
-              borderRadius: "16px",
-              padding: "40px",
-              boxShadow: "0 4px 24px rgba(0,0,0,0.08)",
-              marginBottom: "32px",
-            }}>
-              <h1 style={{
-                fontSize: "32px",
-                fontWeight: 700,
-                color: "#111827",
-                marginBottom: "8px",
-                fontFamily: "'Bebas Neue', 'Arial Black', sans-serif",
-              }}>
-                My Profile
-              </h1>
-              <p style={{
-                fontSize: "16px",
-                color: "#6b7280",
-                marginBottom: "28px",
-              }}>
-                Manage your personal information and account details
-              </p>
-
               <div style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-                gap: "20px",
+                background: "white",
+                borderRadius: "16px",
+                padding: "40px",
+                boxShadow: "0 4px 24px rgba(0,0,0,0.08)",
+                marginBottom: "32px",
               }}>
+                <h1 style={{
+                  fontSize: "32px",
+                  fontWeight: 700,
+                  color: "#111827",
+                  marginBottom: "8px",
+                  fontFamily: "'Bebas Neue', 'Arial Black', sans-serif",
+                }}>
+                  My Profile
+                </h1>
+                <p style={{
+                  fontSize: "16px",
+                  color: "#6b7280",
+                  marginBottom: "28px",
+                }}>
+                  Manage your personal information and account details
+                </p>
+
+                {/* HOME CLUB SELECTOR */}
                 <div style={{
                   border: "1px solid #e5e7eb",
                   borderRadius: "12px",
-                  padding: "20px",
-                  background: "#f8fafc",
+                  padding: "24px",
+                  background: "linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)",
+                  marginBottom: "28px",
                 }}>
-                  <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "6px" }}>
-                    First Name
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "12px" }}>
+                    <span style={{ fontSize: "20px" }}>🏠</span>
+                    <label style={{
+                      fontSize: "16px",
+                      fontWeight: 700,
+                      color: "#0c4a6e",
+                      letterSpacing: "0.5px",
+                    }}>
+                      HOME CLUB
+                    </label>
                   </div>
-                  <div style={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>
-                    {user?.firstName}
-                  </div>
+                  <select
+                    value={profileDetails.homeClubId || ""}
+                    onChange={(e) => {
+                      handleProfileDetailsChange("homeClubId", e.target.value);
+                    }}
+                    style={{
+                      width: "100%",
+                      maxWidth: "400px",
+                      padding: "12px 16px",
+                      border: "2px solid #bae6fd",
+                      borderRadius: "10px",
+                      fontSize: "15px",
+                      fontWeight: 500,
+                      background: "white",
+                      color: "#0c4a6e",
+                      outline: "none",
+                      cursor: "pointer",
+                      transition: "border-color 0.2s",
+                      appearance: "none",
+                      backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`,
+                      backgroundPosition: "right 12px center",
+                      backgroundRepeat: "no-repeat",
+                      backgroundSize: "20px",
+                      paddingRight: "40px",
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = "#0284c7")}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = "#bae6fd")}
+                  >
+                    <option value="">
+                      {loadingClubs ? "Loading clubs..." : registeredClubs.length === 0 ? "No clubs available" : "Select your home club"}
+                    </option>
+                    {registeredClubs.map(club => (
+                      <option key={club.id} value={club.id}>
+                        {club.name}
+                      </option>
+                    ))}
+                  </select>
+                  {profileDetails.homeClubId && registeredClubs.length > 0 && (
+                    <div style={{ marginTop: "10px", fontSize: "13px", color: "#0369a1", fontWeight: 500 }}>
+                      ✓ Home Club: {registeredClubs.find(c => c.id === profileDetails.homeClubId)?.name || "Selected"}
+                    </div>
+                  )}
                 </div>
 
                 <div style={{
-                  border: "1px solid #e5e7eb",
-                  borderRadius: "12px",
-                  padding: "20px",
-                  background: "#f8fafc",
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+                  gap: "20px",
                 }}>
-                  <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "6px" }}>
-                    Last Name
-                  </div>
-                  <div style={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>
-                    {user?.lastName}
-                  </div>
-                </div>
-
-                <div style={{
-                  border: "1px solid #e5e7eb",
-                  borderRadius: "12px",
-                  padding: "20px",
-                  background: "#f8fafc",
-                }}>
-                  <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "6px" }}>
-                    Email Address
-                  </div>
-                  <div style={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>
-                    {user?.email}
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ marginTop: "24px" }}>
-                {updateSuccess && (
-                  <p style={{ marginBottom: "10px", color: "#15803d", fontSize: "13px", fontWeight: 500 }}>
-                    {updateSuccess}
-                  </p>
-                )}
-
-                <button
-                  onClick={() => {
-                    setShowUpdateForm((prev) => !prev);
-                    setUpdateError("");
-                    if (!showUpdateForm) {
-                      setProfileDetails((prev) => ({
-                        ...prev,
-                        fullName: prev.fullName || `${user?.firstName || ""} ${user?.lastName || ""}`.trim(),
-                      }));
-                    }
-                  }}
-                  style={{
-                    padding: "10px 18px",
-                    border: "none",
-                    borderRadius: "8px",
-                    fontSize: "14px",
-                    fontWeight: 600,
-                    color: "white",
-                    background: "#16a34a",
-                    cursor: "pointer",
-                    transition: "background 0.15s",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "#15803d")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "#16a34a")}
-                >
-                  {showUpdateForm ? "Hide Update Form" : "Update"}
-                </button>
-              </div>
-
-              {showUpdateForm && (
-                <form
-                  onSubmit={handleUpdateSubmit}
-                  style={{
-                    marginTop: "20px",
+                  <div style={{
                     border: "1px solid #e5e7eb",
                     borderRadius: "12px",
+                    padding: "20px",
                     background: "#f8fafc",
-                    padding: "22px",
                   }}>
-                  <h3 style={{
-                    fontSize: "18px",
-                    fontWeight: 700,
-                    color: "#111827",
-                    marginBottom: "16px",
-                  }}>
-                    Update Profile Details
-                  </h3>
-
-                  <div style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                    gap: "14px",
-                  }}>
-                    <div>
-                      <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
-                        Full Name
-                      </label>
-                      <input
-                        type="text"
-                        value={profileDetails.fullName}
-                        onChange={(e) => handleProfileDetailsChange("fullName", e.target.value)}
-                        placeholder="Enter full name"
-                        required
-                        style={{
-                          width: "100%",
-                          padding: "10px 12px",
-                          border: "1px solid #d1d5db",
-                          borderRadius: "8px",
-                          fontSize: "14px",
-                          outline: "none",
-                          boxSizing: "border-box",
-                        }}
-                      />
+                    <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "6px" }}>
+                      First Name
                     </div>
-
-                    <div>
-                      <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
-                        Gender
-                      </label>
-                      <select
-                        value={profileDetails.gender}
-                        onChange={(e) => handleProfileDetailsChange("gender", e.target.value)}
-                        required
-                        style={{
-                          width: "100%",
-                          padding: "10px 12px",
-                          border: "1px solid #d1d5db",
-                          borderRadius: "8px",
-                          fontSize: "14px",
-                          background: "white",
-                          outline: "none",
-                          boxSizing: "border-box",
-                        }}
-                      >
-                        <option value="">Select gender</option>
-                        <option value="Male">Male</option>
-                        <option value="Female">Female</option>
-                        <option value="Other">Other</option>
-                        <option value="Prefer not to say">Prefer not to say</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
-                        Date of Birth
-                      </label>
-                      <input
-                        type="date"
-                        value={profileDetails.dob}
-                        onChange={(e) => handleProfileDetailsChange("dob", e.target.value)}
-                        required
-                        style={{
-                          width: "100%",
-                          padding: "10px 12px",
-                          border: "1px solid #d1d5db",
-                          borderRadius: "8px",
-                          fontSize: "14px",
-                          outline: "none",
-                          boxSizing: "border-box",
-                        }}
-                      />
-                    </div>
-
-                    <div>
-                      <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
-                        Age (Auto-calculated)
-                      </label>
-                      <input
-                        type="text"
-                        value={profileDetails.age}
-                        readOnly
-                        placeholder="Calculated from DOB"
-                        required
-                        style={{
-                          width: "100%",
-                          padding: "10px 12px",
-                          border: "1px solid #d1d5db",
-                          borderRadius: "8px",
-                          fontSize: "14px",
-                          background: "#f3f4f6",
-                          color: "#4b5563",
-                          boxSizing: "border-box",
-                        }}
-                      />
-                    </div>
-
-                    <div>
-                      <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
-                        Mobile Number (Optional)
-                      </label>
-                      <input
-                        type="tel"
-                        value={profileDetails.mobileNumber}
-                        onChange={(e) => handleProfileDetailsChange("mobileNumber", e.target.value)}
-                        placeholder="Enter mobile number"
-                        style={{
-                          width: "100%",
-                          padding: "10px 12px",
-                          border: "1px solid #d1d5db",
-                          borderRadius: "8px",
-                          fontSize: "14px",
-                          outline: "none",
-                          boxSizing: "border-box",
-                        }}
-                      />
-                    </div>
-
-                    <div>
-                      <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
-                        Country
-                      </label>
-                      <select
-                        value={profileDetails.country}
-                        onChange={(e) => handleProfileDetailsChange("country", e.target.value)}
-                        required
-                        style={{
-                          width: "100%",
-                          padding: "10px 12px",
-                          border: "1px solid #d1d5db",
-                          borderRadius: "8px",
-                          fontSize: "14px",
-                          background: "white",
-                          outline: "none",
-                          boxSizing: "border-box",
-                        }}
-                      >
-                        <option value="">Select country</option>
-                        {countryOptions.map((country) => (
-                          <option key={country.isoCode} value={country.isoCode}>
-                            {country.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
-                        State
-                      </label>
-                      <select
-                        value={profileDetails.state}
-                        onChange={(e) => handleProfileDetailsChange("state", e.target.value)}
-                        disabled={!profileDetails.country}
-                        required
-                        style={{
-                          width: "100%",
-                          padding: "10px 12px",
-                          border: "1px solid #d1d5db",
-                          borderRadius: "8px",
-                          fontSize: "14px",
-                          background: profileDetails.country ? "white" : "#f3f4f6",
-                          color: profileDetails.country ? "#111827" : "#6b7280",
-                          outline: "none",
-                          boxSizing: "border-box",
-                        }}
-                      >
-                        <option value="">{profileDetails.country ? "Select state" : "Select country first"}</option>
-                        {stateOptions.map((state) => (
-                          <option key={state.isoCode} value={state.name}>
-                            {state.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
-                        City
-                      </label>
-                      <input
-                        type="text"
-                        value={profileDetails.city}
-                        onChange={(e) => handleProfileDetailsChange("city", e.target.value)}
-                        placeholder="Enter city"
-                        required
-                        style={{
-                          width: "100%",
-                          padding: "10px 12px",
-                          border: "1px solid #d1d5db",
-                          borderRadius: "8px",
-                          fontSize: "14px",
-                          outline: "none",
-                          boxSizing: "border-box",
-                        }}
-                      />
-                    </div>
-
-                    <div>
-                      <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
-                        Interested Sport
-                      </label>
-                      <select
-                        value={profileDetails.interestedSport}
-                        onChange={(e) => handleProfileDetailsChange("interestedSport", e.target.value)}
-                        required
-                        style={{
-                          width: "100%",
-                          padding: "10px 12px",
-                          border: "1px solid #d1d5db",
-                          borderRadius: "8px",
-                          fontSize: "14px",
-                          background: "white",
-                          outline: "none",
-                          boxSizing: "border-box",
-                        }}
-                      >
-                        <option value="">Select sport</option>
-                        <option value="Cricket">Cricket</option>
-                        <option value="Batminton">Batminton</option>
-                        <option value="Football">Football</option>
-                        <option value="Volley Ball">Volley Ball</option>
-                        <option value="Basket Ball">Basket Ball</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
-                        Experience
-                      </label>
-                      <input
-                        type="text"
-                        value={profileDetails.experience}
-                        onChange={(e) => handleProfileDetailsChange("experience", e.target.value)}
-                        placeholder="Enter your experience"
-                        required
-                        style={{
-                          width: "100%",
-                          padding: "10px 12px",
-                          border: "1px solid #d1d5db",
-                          borderRadius: "8px",
-                          fontSize: "14px",
-                          outline: "none",
-                          boxSizing: "border-box",
-                        }}
-                      />
-                    </div>
-
-                    <div style={{ gridColumn: "1 / -1" }}>
-                      <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
-                        Social Media Links (Optional)
-                      </label>
-                      <input
-                        type="text"
-                        value={profileDetails.socialMediaLinks}
-                        onChange={(e) => handleProfileDetailsChange("socialMediaLinks", e.target.value)}
-                        placeholder="Paste profile link(s)"
-                        style={{
-                          width: "100%",
-                          padding: "10px 12px",
-                          border: "1px solid #d1d5db",
-                          borderRadius: "8px",
-                          fontSize: "14px",
-                          outline: "none",
-                          boxSizing: "border-box",
-                        }}
-                      />
-                    </div>
-
-                    <div style={{ gridColumn: "1 / -1" }}>
-                      <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
-                        Profile Photo
-                      </label>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handlePhotoChange}
-                        style={{
-                          width: "100%",
-                          fontSize: "14px",
-                          color: "#374151",
-                        }}
-                      />
-
-                      {profileDetails.profilePhotoPreview && (
-                        <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "10px" }}>
-                          <img
-                            src={profileDetails.profilePhotoPreview}
-                            alt="Profile preview"
-                            style={{
-                              width: "64px",
-                              height: "64px",
-                              objectFit: "cover",
-                              borderRadius: "10px",
-                              border: "1px solid #e5e7eb",
-                            }}
-                          />
-                          <span style={{ fontSize: "13px", color: "#4b5563" }}>
-                            {profileDetails.profilePhoto?.name}
-                          </span>
-                        </div>
-                      )}
+                    <div style={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>
+                      {user?.firstName}
                     </div>
                   </div>
 
-                  {updateError && (
-                    <p style={{ marginTop: "14px", color: "#dc2626", fontSize: "13px", fontWeight: 500 }}>
-                      {updateError}
+                  <div style={{
+                    border: "1px solid #e5e7eb",
+                    borderRadius: "12px",
+                    padding: "20px",
+                    background: "#f8fafc",
+                  }}>
+                    <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "6px" }}>
+                      Last Name
+                    </div>
+                    <div style={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>
+                      {user?.lastName}
+                    </div>
+                  </div>
+
+                  <div style={{
+                    border: "1px solid #e5e7eb",
+                    borderRadius: "12px",
+                    padding: "20px",
+                    background: "#f8fafc",
+                  }}>
+                    <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "6px" }}>
+                      Email Address
+                    </div>
+                    <div style={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>
+                      {user?.email}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: "24px" }}>
+                  {updateSuccess && (
+                    <p style={{ marginBottom: "10px", color: "#15803d", fontSize: "13px", fontWeight: 500 }}>
+                      {updateSuccess}
                     </p>
                   )}
 
-                  <div style={{ marginTop: "16px" }}>
-                    <button
-                      type="submit"
-                      style={{
-                        padding: "10px 18px",
-                        border: "none",
-                        borderRadius: "8px",
-                        fontSize: "14px",
-                        fontWeight: 600,
-                        color: "white",
-                        background: "#2563eb",
-                        cursor: "pointer",
-                      }}
-                    >
-                      Save Details
-                    </button>
-                  </div>
-                </form>
-              )}
-            </div>
-
-            {/* SPORTS SKILLS SECTION */}
-            <div style={{
-              background: "white",
-              borderRadius: "16px",
-              padding: "40px",
-              boxShadow: "0 4px 24px rgba(0,0,0,0.08)",
-              marginBottom: "32px",
-            }}>
-              <h2 style={{
-                fontSize: "24px",
-                fontWeight: 700,
-                color: "#111827",
-                marginBottom: "8px",
-                fontFamily: "'Bebas Neue', 'Arial Black', sans-serif",
-              }}>
-                Sport-Specific Skills
-              </h2>
-              <p style={{
-                fontSize: "16px",
-                color: "#6b7280",
-                marginBottom: "28px",
-              }}>
-                Select your sports and update your skill levels
-              </p>
-
-              {/* SPORT SELECTOR */}
-              <div style={{ marginBottom: "24px" }}>
-                <label style={{ display: "block", fontSize: "14px", fontWeight: 600, color: "#374151", marginBottom: "8px" }}>
-                  Selected Sports
-                </label>
-                <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
-                  {["badminton", "volleyball", "cricket", "tennis"].map(sport => (
-                    <button
-                      key={sport}
-                      onClick={() => handleSportToggle(sport)}
-                      style={{
-                        padding: "8px 16px",
-                        borderRadius: "20px",
-                        border: `1px solid ${selectedSports.includes(sport) ? "#3b82f6" : "#d1d5db"}`,
-                        background: selectedSports.includes(sport) ? "#eff6ff" : "white",
-                        color: selectedSports.includes(sport) ? "#1d4ed8" : "#4b5563",
-                        fontSize: "14px",
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "6px",
-                        transition: "all 0.2s"
-                      }}
-                    >
-                      {selectedSports.includes(sport) ? "✓" : "+"} {sport.charAt(0).toUpperCase() + sport.slice(1)}
-                    </button>
-                  ))}
+                  <button
+                    onClick={() => {
+                      setShowUpdateForm((prev) => !prev);
+                      setUpdateError("");
+                      if (!showUpdateForm) {
+                        setProfileDetails((prev) => ({
+                          ...prev,
+                          fullName: prev.fullName || `${user?.firstName || ""} ${user?.lastName || ""}`.trim(),
+                        }));
+                      }
+                    }}
+                    style={{
+                      padding: "10px 18px",
+                      border: "none",
+                      borderRadius: "8px",
+                      fontSize: "14px",
+                      fontWeight: 600,
+                      color: "white",
+                      background: "#16a34a",
+                      cursor: "pointer",
+                      transition: "background 0.15s",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#15803d")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "#16a34a")}
+                  >
+                    {showUpdateForm ? "Hide Update Form" : "Update"}
+                  </button>
                 </div>
-              </div>
 
-              {/* BADMINTON SKILLS */}
-              {selectedSports.includes("badminton") && (
-                <div style={{
-                  border: "1px solid #e5e7eb",
-                  borderRadius: "12px",
-                  background: "#f8fafc",
-                  padding: "24px",
-                  marginTop: "24px",
-                }}>
-                  <h3 style={{
-                    fontSize: "18px",
-                    fontWeight: 700,
-                    color: "#111827",
-                    marginBottom: "20px",
-                    textTransform: "uppercase"
-                  }}>
-                    Badminton Skills
-                  </h3>
+                {showUpdateForm && (
+                  <form
+                    onSubmit={handleUpdateSubmit}
+                    style={{
+                      marginTop: "20px",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: "12px",
+                      background: "#f8fafc",
+                      padding: "22px",
+                    }}>
+                    <h3 style={{
+                      fontSize: "18px",
+                      fontWeight: 700,
+                      color: "#111827",
+                      marginBottom: "16px",
+                    }}>
+                      Update Profile Details
+                    </h3>
 
-                  <div style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                    gap: "16px",
-                  }}>
-                    {/* Playing Hand */}
-                    <div>
-                      <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>
-                        Playing Hand
-                      </label>
-                      <select
-                        value={sportsSkills.badminton?.playingHand || ""}
-                        onChange={(e) => handleSkillChange("badminton", "playingHand", e.target.value)}
-                        style={{
-                          width: "100%",
-                          padding: "10px 12px",
-                          border: "1px solid #d1d5db",
-                          borderRadius: "8px",
-                          fontSize: "14px",
-                          background: "white",
-                          outline: "none",
-                        }}
-                      >
-                        <option value="">Select Hand</option>
-                        <option value="Right Hand">Right Hand</option>
-                        <option value="Left Hand">Left Hand</option>
-                      </select>
-                    </div>
+                    <div style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                      gap: "14px",
+                    }}>
+                      <div>
+                        <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
+                          Full Name
+                        </label>
+                        <input
+                          type="text"
+                          value={profileDetails.fullName}
+                          onChange={(e) => handleProfileDetailsChange("fullName", e.target.value)}
+                          placeholder="Enter full name"
+                          required
+                          style={{
+                            width: "100%",
+                            padding: "10px 12px",
+                            border: "1px solid #d1d5db",
+                            borderRadius: "8px",
+                            fontSize: "14px",
+                            outline: "none",
+                            boxSizing: "border-box",
+                          }}
+                        />
+                      </div>
 
-                    {/* Other Skills */}
-                    {[
-                      { key: "smash", label: "Smash" },
-                      { key: "serve", label: "Serve" },
-                      { key: "dropShot", label: "Drop Shot" },
-                      { key: "clear", label: "Clear" },
-                      { key: "drive", label: "Drive" },
-                      { key: "netPlay", label: "Net Play" },
-                      { key: "defense", label: "Defense" },
-                      { key: "footwork", label: "Footwork" },
-                      { key: "forehand", label: "Forehand" },
-                      { key: "backhand", label: "Backhand" },
-                    ].map(skill => (
-                      <div key={skill.key}>
-                        <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>
-                          {skill.label}
+                      <div>
+                        <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
+                          Gender
                         </label>
                         <select
-                          value={sportsSkills.badminton?.[skill.key] || ""}
-                          onChange={(e) => handleSkillChange("badminton", skill.key, e.target.value)}
+                          value={profileDetails.gender}
+                          onChange={(e) => handleProfileDetailsChange("gender", e.target.value)}
+                          required
                           style={{
                             width: "100%",
                             padding: "10px 12px",
@@ -1699,24 +1373,339 @@ export default function Dashboard() {
                             fontSize: "14px",
                             background: "white",
                             outline: "none",
+                            boxSizing: "border-box",
                           }}
                         >
-                          <option value="">Select Level</option>
-                          <option value="Beginner">Beginner</option>
-                          <option value="Intermediate">Intermediate</option>
-                          <option value="Advanced">Advanced</option>
+                          <option value="">Select gender</option>
+                          <option value="Male">Male</option>
+                          <option value="Female">Female</option>
+                          <option value="Other">Other</option>
+                          <option value="Prefer not to say">Prefer not to say</option>
                         </select>
                       </div>
+
+                      <div>
+                        <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
+                          Date of Birth
+                        </label>
+                        <input
+                          type="date"
+                          value={profileDetails.dob}
+                          onChange={(e) => handleProfileDetailsChange("dob", e.target.value)}
+                          required
+                          style={{
+                            width: "100%",
+                            padding: "10px 12px",
+                            border: "1px solid #d1d5db",
+                            borderRadius: "8px",
+                            fontSize: "14px",
+                            outline: "none",
+                            boxSizing: "border-box",
+                          }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
+                          Age (Auto-calculated)
+                        </label>
+                        <input
+                          type="text"
+                          value={profileDetails.age}
+                          readOnly
+                          placeholder="Calculated from DOB"
+                          required
+                          style={{
+                            width: "100%",
+                            padding: "10px 12px",
+                            border: "1px solid #d1d5db",
+                            borderRadius: "8px",
+                            fontSize: "14px",
+                            background: "#f3f4f6",
+                            color: "#4b5563",
+                            boxSizing: "border-box",
+                          }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
+                          Mobile Number (Optional)
+                        </label>
+                        <input
+                          type="tel"
+                          value={profileDetails.mobileNumber}
+                          onChange={(e) => handleProfileDetailsChange("mobileNumber", e.target.value)}
+                          placeholder="Enter mobile number"
+                          style={{
+                            width: "100%",
+                            padding: "10px 12px",
+                            border: "1px solid #d1d5db",
+                            borderRadius: "8px",
+                            fontSize: "14px",
+                            outline: "none",
+                            boxSizing: "border-box",
+                          }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
+                          Country
+                        </label>
+                        <select
+                          value={profileDetails.country}
+                          onChange={(e) => handleProfileDetailsChange("country", e.target.value)}
+                          required
+                          style={{
+                            width: "100%",
+                            padding: "10px 12px",
+                            border: "1px solid #d1d5db",
+                            borderRadius: "8px",
+                            fontSize: "14px",
+                            background: "white",
+                            outline: "none",
+                            boxSizing: "border-box",
+                          }}
+                        >
+                          <option value="">Select country</option>
+                          {countryOptions.map((country) => (
+                            <option key={country.isoCode} value={country.isoCode}>
+                              {country.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
+                          State
+                        </label>
+                        <select
+                          value={profileDetails.state}
+                          onChange={(e) => handleProfileDetailsChange("state", e.target.value)}
+                          disabled={!profileDetails.country}
+                          required
+                          style={{
+                            width: "100%",
+                            padding: "10px 12px",
+                            border: "1px solid #d1d5db",
+                            borderRadius: "8px",
+                            fontSize: "14px",
+                            background: profileDetails.country ? "white" : "#f3f4f6",
+                            color: profileDetails.country ? "#111827" : "#6b7280",
+                            outline: "none",
+                            boxSizing: "border-box",
+                          }}
+                        >
+                          <option value="">{profileDetails.country ? "Select state" : "Select country first"}</option>
+                          {stateOptions.map((state) => (
+                            <option key={state.isoCode} value={state.name}>
+                              {state.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
+                          City
+                        </label>
+                        <input
+                          type="text"
+                          value={profileDetails.city}
+                          onChange={(e) => handleProfileDetailsChange("city", e.target.value)}
+                          placeholder="Enter city"
+                          required
+                          style={{
+                            width: "100%",
+                            padding: "10px 12px",
+                            border: "1px solid #d1d5db",
+                            borderRadius: "8px",
+                            fontSize: "14px",
+                            outline: "none",
+                            boxSizing: "border-box",
+                          }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
+                          Interested Sport
+                        </label>
+                        <select
+                          value={profileDetails.interestedSport}
+                          onChange={(e) => handleProfileDetailsChange("interestedSport", e.target.value)}
+                          required
+                          style={{
+                            width: "100%",
+                            padding: "10px 12px",
+                            border: "1px solid #d1d5db",
+                            borderRadius: "8px",
+                            fontSize: "14px",
+                            background: "white",
+                            outline: "none",
+                            boxSizing: "border-box",
+                          }}
+                        >
+                          <option value="">Select sport</option>
+                          <option value="Cricket">Cricket</option>
+                          <option value="Batminton">Batminton</option>
+                          <option value="Football">Football</option>
+                          <option value="Volley Ball">Volley Ball</option>
+                          <option value="Basket Ball">Basket Ball</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
+                          Experience
+                        </label>
+                        <input
+                          type="text"
+                          value={profileDetails.experience}
+                          onChange={(e) => handleProfileDetailsChange("experience", e.target.value)}
+                          placeholder="Enter your experience"
+                          required
+                          style={{
+                            width: "100%",
+                            padding: "10px 12px",
+                            border: "1px solid #d1d5db",
+                            borderRadius: "8px",
+                            fontSize: "14px",
+                            outline: "none",
+                            boxSizing: "border-box",
+                          }}
+                        />
+                      </div>
+
+                      <div style={{ gridColumn: "1 / -1" }}>
+                        <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
+                          Social Media Links (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          value={profileDetails.socialMediaLinks}
+                          onChange={(e) => handleProfileDetailsChange("socialMediaLinks", e.target.value)}
+                          placeholder="Paste profile link(s)"
+                          style={{
+                            width: "100%",
+                            padding: "10px 12px",
+                            border: "1px solid #d1d5db",
+                            borderRadius: "8px",
+                            fontSize: "14px",
+                            outline: "none",
+                            boxSizing: "border-box",
+                          }}
+                        />
+                      </div>
+
+                      <div style={{ gridColumn: "1 / -1" }}>
+                        <label style={{ display: "block", fontSize: "13px", color: "#374151", marginBottom: "6px" }}>
+                          Profile Photo
+                        </label>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handlePhotoChange}
+                          style={{
+                            width: "100%",
+                            fontSize: "14px",
+                            color: "#374151",
+                          }}
+                        />
+
+                        {profileDetails.profilePhotoPreview && (
+                          <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "10px" }}>
+                            <img
+                              src={profileDetails.profilePhotoPreview}
+                              alt="Profile preview"
+                              style={{
+                                width: "64px",
+                                height: "64px",
+                                objectFit: "cover",
+                                borderRadius: "10px",
+                                border: "1px solid #e5e7eb",
+                              }}
+                            />
+                            <span style={{ fontSize: "13px", color: "#4b5563" }}>
+                              {profileDetails.profilePhoto?.name}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {updateError && (
+                      <p style={{ marginTop: "14px", color: "#dc2626", fontSize: "13px", fontWeight: 500 }}>
+                        {updateError}
+                      </p>
+                    )}
+
+                    {/* Unified Save Details button is at the bottom of the profile page */}
+                  </form>
+                )}
+              </div>
+
+              {/* SPORTS SKILLS SECTION */}
+              <div style={{
+                background: "white",
+                borderRadius: "16px",
+                padding: "40px",
+                boxShadow: "0 4px 24px rgba(0,0,0,0.08)",
+                marginBottom: "32px",
+              }}>
+                <h2 style={{
+                  fontSize: "24px",
+                  fontWeight: 700,
+                  color: "#111827",
+                  marginBottom: "8px",
+                  fontFamily: "'Bebas Neue', 'Arial Black', sans-serif",
+                }}>
+                  Sport-Specific Skills
+                </h2>
+                <p style={{
+                  fontSize: "16px",
+                  color: "#6b7280",
+                  marginBottom: "28px",
+                }}>
+                  Select your sports and update your skill levels
+                </p>
+
+                {/* SPORT SELECTOR */}
+                <div style={{ marginBottom: "24px" }}>
+                  <label style={{ display: "block", fontSize: "14px", fontWeight: 600, color: "#374151", marginBottom: "8px" }}>
+                    Selected Sports
+                  </label>
+                  <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+                    {["badminton", "volleyball", "cricket", "tennis"].map(sport => (
+                      <button
+                        key={sport}
+                        onClick={() => handleSportToggle(sport)}
+                        style={{
+                          padding: "8px 16px",
+                          borderRadius: "20px",
+                          border: `1px solid ${selectedSports.includes(sport) ? "#3b82f6" : "#d1d5db"}`,
+                          background: selectedSports.includes(sport) ? "#eff6ff" : "white",
+                          color: selectedSports.includes(sport) ? "#1d4ed8" : "#4b5563",
+                          fontSize: "14px",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          transition: "all 0.2s"
+                        }}
+                      >
+                        {selectedSports.includes(sport) ? "✓" : "+"} {sport.charAt(0).toUpperCase() + sport.slice(1)}
+                      </button>
                     ))}
                   </div>
                 </div>
-              )}
 
-              {/* OTHER SPORTS SKILLS */}
-              {["volleyball", "cricket", "tennis"].map(sport => {
-                if (!selectedSports.includes(sport)) return null;
-                return (
-                  <div key={sport} style={{
+                {/* BADMINTON SKILLS */}
+                {selectedSports.includes("badminton") && (
+                  <div style={{
                     border: "1px solid #e5e7eb",
                     borderRadius: "12px",
                     background: "#f8fafc",
@@ -1730,21 +1719,58 @@ export default function Dashboard() {
                       marginBottom: "20px",
                       textTransform: "uppercase"
                     }}>
-                      {sport} Skills
+                      Badminton Skills
                     </h3>
+
                     <div style={{
                       display: "grid",
                       gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
                       gap: "16px",
                     }}>
-                      {SPORT_SKILLS_CONFIG[sport].map(skill => (
+                      {/* Playing Hand */}
+                      <div>
+                        <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>
+                          Playing Hand
+                        </label>
+                        <select
+                          value={sportsSkills.badminton?.playingHand || ""}
+                          onChange={(e) => handleSkillChange("badminton", "playingHand", e.target.value)}
+                          style={{
+                            width: "100%",
+                            padding: "10px 12px",
+                            border: "1px solid #d1d5db",
+                            borderRadius: "8px",
+                            fontSize: "14px",
+                            background: "white",
+                            outline: "none",
+                          }}
+                        >
+                          <option value="">Select Hand</option>
+                          <option value="Right Hand">Right Hand</option>
+                          <option value="Left Hand">Left Hand</option>
+                        </select>
+                      </div>
+
+                      {/* Other Skills */}
+                      {[
+                        { key: "smash", label: "Smash" },
+                        { key: "serve", label: "Serve" },
+                        { key: "dropShot", label: "Drop Shot" },
+                        { key: "clear", label: "Clear" },
+                        { key: "drive", label: "Drive" },
+                        { key: "netPlay", label: "Net Play" },
+                        { key: "defense", label: "Defense" },
+                        { key: "footwork", label: "Footwork" },
+                        { key: "forehand", label: "Forehand" },
+                        { key: "backhand", label: "Backhand" },
+                      ].map(skill => (
                         <div key={skill.key}>
                           <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>
                             {skill.label}
                           </label>
                           <select
-                            value={sportsSkills[sport]?.[skill.key] || ""}
-                            onChange={(e) => handleSkillChange(sport, skill.key, e.target.value)}
+                            value={sportsSkills.badminton?.[skill.key] || ""}
+                            onChange={(e) => handleSkillChange("badminton", skill.key, e.target.value)}
                             style={{
                               width: "100%",
                               padding: "10px 12px",
@@ -1764,41 +1790,85 @@ export default function Dashboard() {
                       ))}
                     </div>
                   </div>
-                );
-              })}
+                )}
 
-              {/* SAVE BUTTON SECTION */}
-              {selectedSports.length > 0 && (
-                <div style={{ marginTop: "24px" }}>
-                  {skillsUpdateError && (
-                    <p style={{ marginBottom: "16px", color: "#dc2626", fontSize: "13px", fontWeight: 500 }}>
-                      {skillsUpdateError}
-                    </p>
-                  )}
-                  {skillsUpdateSuccess && (
-                    <p style={{ marginBottom: "16px", color: "#15803d", fontSize: "13px", fontWeight: 500 }}>
-                      {skillsUpdateSuccess}
-                    </p>
-                  )}
+                {/* OTHER SPORTS SKILLS */}
+                {["volleyball", "cricket", "tennis"].map(sport => {
+                  if (!selectedSports.includes(sport)) return null;
+                  return (
+                    <div key={sport} style={{
+                      border: "1px solid #e5e7eb",
+                      borderRadius: "12px",
+                      background: "#f8fafc",
+                      padding: "24px",
+                      marginTop: "24px",
+                    }}>
+                      <h3 style={{
+                        fontSize: "18px",
+                        fontWeight: 700,
+                        color: "#111827",
+                        marginBottom: "20px",
+                        textTransform: "uppercase"
+                      }}>
+                        {sport} Skills
+                      </h3>
+                      <div style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                        gap: "16px",
+                      }}>
+                        {SPORT_SKILLS_CONFIG[sport].map(skill => (
+                          <div key={skill.key}>
+                            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>
+                              {skill.label}
+                            </label>
+                            <select
+                              value={sportsSkills[sport]?.[skill.key] || ""}
+                              onChange={(e) => handleSkillChange(sport, skill.key, e.target.value)}
+                              style={{
+                                width: "100%",
+                                padding: "10px 12px",
+                                border: "1px solid #d1d5db",
+                                borderRadius: "8px",
+                                fontSize: "14px",
+                                background: "white",
+                                outline: "none",
+                              }}
+                            >
+                              <option value="">Select Level</option>
+                              <option value="Beginner">Beginner</option>
+                              <option value="Intermediate">Intermediate</option>
+                              <option value="Advanced">Advanced</option>
+                            </select>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* SAVE BUTTON SECTION */}
+                <div style={{ marginTop: "32px", borderTop: "1px solid #e5e7eb", paddingTop: "24px", display: "flex", justifyContent: "flex-end", alignItems: "center" }}>
                   <button
-                    onClick={handleSkillsUpdateSubmit}
+                    onClick={handleUpdateSubmit}
+                    disabled={!isDirty || isSaving}
                     style={{
-                      padding: "10px 18px",
+                      padding: "12px 24px",
                       border: "none",
                       borderRadius: "8px",
-                      fontSize: "14px",
+                      fontSize: "16px",
                       fontWeight: 600,
-                      color: "white",
-                      background: "#0369a1",
-                      cursor: "pointer",
+                      color: (!isDirty || isSaving) ? "white" : "white",
+                      background: (!isDirty || isSaving) ? "#9ca3af" : "#2563eb",
+                      cursor: (!isDirty || isSaving) ? "not-allowed" : "pointer",
+                      transition: "all 0.2s"
                     }}
                   >
-                    Save Skills
+                    {isSaving ? "Saving..." : "Save Details"}
                   </button>
                 </div>
-              )}
 
-            </div>
+              </div>
             </>
           ) : activeSection === "matches" ? (
             <div style={{
@@ -2836,7 +2906,7 @@ export default function Dashboard() {
                   color: "#6b7280",
                   marginBottom: "32px",
                 }}>
-                  Here's your VINISPORT activity
+                  Here's your overall sports stats
                 </p>
 
                 {statsLoading ? (

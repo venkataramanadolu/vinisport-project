@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:5000";
 
@@ -85,6 +85,7 @@ export default function EventTypes() {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [selectedEvent, setSelectedEvent] = useState(null);
 
   useEffect(() => {
     const fetchCurrentUser = async (token) => {
@@ -125,6 +126,36 @@ export default function EventTypes() {
     navigate(`/dashboard?view=createLeague&eventType=${eventTypeId}`);
   };
 
+  const openModal = useCallback((eventType) => {
+    setSelectedEvent(eventType);
+  }, []);
+
+  const closeModal = useCallback(() => {
+    setSelectedEvent(null);
+  }, []);
+
+  // Close modal on Escape key
+  useEffect(() => {
+    if (!selectedEvent) return;
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") closeModal();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [selectedEvent, closeModal]);
+
+  // Prevent background scroll when modal is open
+  useEffect(() => {
+    if (selectedEvent) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [selectedEvent]);
+
   if (loading) {
     return (
       <div
@@ -157,62 +188,73 @@ export default function EventTypes() {
         rel="stylesheet"
       />
 
-      {/* Responsive styles */}
+      {/* Styles */}
       <style>{`
+        /* ── Event cards (title-only list) ── */
         .event-card {
           display: flex;
-          flex-direction: row;
           align-items: center;
           background: white;
-          border-radius: 16px;
-          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 2px 12px rgba(0, 0, 0, 0.04);
-          padding: 28px 32px 28px 0;
-          transition: box-shadow 0.25s ease, transform 0.2s ease, border-color 0.25s ease;
+          border-radius: 14px;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 2px 12px rgba(0,0,0,0.04);
           border: 1px solid #E2E8F0;
           position: relative;
           overflow: hidden;
+          cursor: pointer;
+          transition: box-shadow 0.22s ease, transform 0.18s ease, border-color 0.22s ease;
+          padding: 0;
+          text-align: left;
+          width: 100%;
+          font-family: inherit;
         }
         .event-card:hover {
-          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08), 0 8px 32px rgba(0, 0, 0, 0.06);
+          box-shadow: 0 4px 18px rgba(0,0,0,0.09), 0 8px 32px rgba(0,0,0,0.06);
           transform: translateY(-2px);
         }
-        .event-card-title {
-          width: 22%;
-          min-width: 160px;
-          padding-right: 24px;
-          padding-left: 32px;
-          flex-shrink: 0;
+        .event-card:focus-visible {
+          outline: 2px solid #4F46E5;
+          outline-offset: 2px;
         }
-        .event-card-desc {
-          flex: 1;
-          padding-right: 24px;
-          min-width: 0;
-        }
-        .event-card-action {
-          width: 18%;
-          min-width: 160px;
-          flex-shrink: 0;
+        .event-card-inner {
           display: flex;
           align-items: center;
-          justify-content: flex-end;
+          width: 100%;
+          padding: 20px 24px 20px 0;
         }
-        .event-card-btn {
-          padding: 10px 20px;
-          color: white;
-          border: none;
-          border-radius: 10px;
-          font-size: 13px;
+        .event-card-accent-bar {
+          position: absolute;
+          left: 0;
+          top: 0;
+          bottom: 0;
+          width: 5px;
+          border-radius: 14px 0 0 14px;
+        }
+        .event-card-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          opacity: 0.7;
+          flex-shrink: 0;
+          margin-left: 32px;
+          margin-right: 14px;
+        }
+        .event-card-title-text {
+          flex: 1;
+          font-size: 16px;
           font-weight: 700;
-          cursor: pointer;
-          white-space: nowrap;
-          transition: background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
-          letter-spacing: 0.2px;
+          line-height: 1.3;
+          margin: 0;
         }
-        .event-card-btn:hover {
-          transform: scale(1.03);
+        .event-card-arrow {
+          font-size: 18px;
+          opacity: 0.5;
+          margin-left: 12px;
+          transition: transform 0.18s ease, opacity 0.18s ease;
+          flex-shrink: 0;
         }
-        .event-card-btn:active {
-          transform: scale(0.98);
+        .event-card:hover .event-card-arrow {
+          transform: translateX(4px);
+          opacity: 0.85;
         }
         .event-page-header {
           display: flex;
@@ -222,38 +264,146 @@ export default function EventTypes() {
           flex-wrap: wrap;
           margin-bottom: 32px;
         }
+
+        /* ── Modal overlay ── */
+        .event-modal-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(0,0,0,0.45);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 1000;
+          padding: 16px;
+          box-sizing: border-box;
+          animation: et-fade-in 0.18s ease;
+        }
+        @keyframes et-fade-in {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+
+        /* ── Modal box ── */
+        .event-modal {
+          background: white;
+          border-radius: 18px;
+          box-shadow: 0 24px 64px rgba(0,0,0,0.18), 0 8px 24px rgba(0,0,0,0.10);
+          max-width: 560px;
+          width: 100%;
+          position: relative;
+          overflow: hidden;
+          animation: et-slide-up 0.22s ease;
+          max-height: 90vh;
+          display: flex;
+          flex-direction: column;
+        }
+        @keyframes et-slide-up {
+          from { opacity: 0; transform: translateY(16px) scale(0.98); }
+          to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .event-modal-accent-bar {
+          height: 5px;
+          width: 100%;
+          flex-shrink: 0;
+        }
+        .event-modal-body {
+          padding: 28px 32px 32px 32px;
+          overflow-y: auto;
+          flex: 1;
+        }
+        .event-modal-close {
+          position: absolute;
+          top: 16px;
+          right: 16px;
+          background: #f3f4f6;
+          border: none;
+          border-radius: 50%;
+          width: 32px;
+          height: 32px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 16px;
+          color: #6b7280;
+          transition: background 0.15s, color 0.15s;
+          flex-shrink: 0;
+          line-height: 1;
+        }
+        .event-modal-close:hover {
+          background: #e5e7eb;
+          color: #111827;
+        }
+        .event-modal-close:focus-visible {
+          outline: 2px solid #4F46E5;
+          outline-offset: 2px;
+        }
+        .event-modal-title {
+          font-family: 'Bebas Neue', 'Arial Black', sans-serif;
+          font-size: 26px;
+          letter-spacing: 1.5px;
+          margin: 0 0 20px 0;
+          line-height: 1.15;
+          padding-right: 40px;
+        }
+        .event-modal-desc p {
+          font-size: 14px;
+          color: #475569;
+          line-height: 1.7;
+          margin: 0 0 12px 0;
+        }
+        .event-modal-desc p:last-child {
+          margin-bottom: 0;
+        }
+        .event-modal-desc p.italic {
+          font-style: italic;
+          color: #64748b;
+        }
+        .event-modal-btn {
+          display: block;
+          margin-top: 28px;
+          padding: 12px 24px;
+          color: white;
+          border: none;
+          border-radius: 10px;
+          font-size: 14px;
+          font-weight: 700;
+          cursor: pointer;
+          font-family: inherit;
+          letter-spacing: 0.2px;
+          transition: background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+          width: 100%;
+        }
+        .event-modal-btn:hover {
+          transform: translateY(-1px);
+        }
+        .event-modal-btn:active {
+          transform: scale(0.98);
+        }
+        .event-modal-btn:focus-visible {
+          outline: 2px solid rgba(255,255,255,0.7);
+          outline-offset: 2px;
+        }
+
+        /* ── Responsive ── */
         @media (max-width: 768px) {
-          .event-card {
-            flex-direction: column;
-            align-items: flex-start;
-            padding: 20px 20px 20px 0;
-            gap: 16px;
-          }
-          .event-card-title {
-            width: 100%;
-            min-width: 0;
-            padding-right: 20px;
-            padding-left: 28px;
-            padding-bottom: 4px;
-            border-bottom: 1px solid #f3f4f6;
-          }
-          .event-card-desc {
-            padding-right: 20px;
-            padding-left: 28px;
-            width: 100%;
-            box-sizing: border-box;
-          }
-          .event-card-action {
-            width: 100%;
-            min-width: 0;
-            justify-content: flex-start;
-            padding-left: 28px;
-          }
           .event-page-content {
             padding: 24px 16px !important;
           }
           .event-page-nav {
             padding: 14px 16px !important;
+          }
+          .event-card-dot {
+            margin-left: 20px;
+          }
+          .event-card-inner {
+            padding: 18px 20px 18px 0;
+          }
+          .event-modal-body {
+            padding: 24px 20px 28px 20px;
+          }
+          .event-modal-title {
+            font-size: 22px;
           }
         }
       `}</style>
@@ -362,16 +512,19 @@ export default function EventTypes() {
           </button>
         </div>
 
-        {/* Event Type Cards */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        {/* Event Type Cards — title only */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           {eventTypes.map((eventType) => (
-            <div
+            <button
               key={eventType.id}
+              type="button"
               className="event-card"
+              aria-haspopup="dialog"
               style={{
                 background: eventType.accentBg,
-                borderColor: undefined,
+                borderColor: "#E2E8F0",
               }}
+              onClick={() => openModal(eventType)}
               onMouseEnter={(e) => {
                 e.currentTarget.style.borderColor = eventType.accent + "40";
               }}
@@ -381,86 +534,111 @@ export default function EventTypes() {
             >
               {/* Left accent bar */}
               <div
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  top: 0,
-                  bottom: 0,
-                  width: "5px",
-                  background: eventType.accent,
-                  borderRadius: "16px 0 0 16px",
-                }}
+                className="event-card-accent-bar"
+                style={{ background: eventType.accent }}
               />
 
-              {/* Section 1: Title */}
-              <div className="event-card-title">
+              <div className="event-card-inner">
+                {/* Accent dot */}
                 <div
-                  style={{
-                    width: "8px",
-                    height: "8px",
-                    borderRadius: "50%",
-                    background: eventType.accent,
-                    marginBottom: "8px",
-                    opacity: 0.7,
-                  }}
+                  className="event-card-dot"
+                  style={{ background: eventType.accent }}
                 />
+
+                {/* Title */}
                 <h2
-                  style={{
-                    fontSize: "17px",
-                    fontWeight: 700,
-                    color: eventType.accent,
-                    margin: 0,
-                    lineHeight: 1.3,
-                  }}
+                  className="event-card-title-text"
+                  style={{ color: eventType.accent }}
                 >
                   {eventType.title}
                 </h2>
-              </div>
 
-              {/* Section 2: Description */}
-              <div className="event-card-desc">
-                {eventType.description.split("\n\n").map((paragraph, idx) => (
+                {/* Arrow */}
+                <span
+                  className="event-card-arrow"
+                  style={{ color: eventType.accent }}
+                  aria-hidden="true"
+                >
+                  →
+                </span>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Modal */}
+      {selectedEvent && (
+        <div
+          className="event-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="event-modal-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeModal();
+          }}
+        >
+          <div className="event-modal">
+            {/* Top accent bar */}
+            <div
+              className="event-modal-accent-bar"
+              style={{ background: selectedEvent.accent }}
+            />
+
+            {/* Close button */}
+            <button
+              type="button"
+              className="event-modal-close"
+              onClick={closeModal}
+              aria-label="Close"
+            >
+              ✕
+            </button>
+
+            {/* Body */}
+            <div className="event-modal-body">
+              <h2
+                id="event-modal-title"
+                className="event-modal-title"
+                style={{ color: selectedEvent.accent }}
+              >
+                {selectedEvent.title.toUpperCase()}
+              </h2>
+
+              <div className="event-modal-desc">
+                {selectedEvent.description.split("\n\n").map((paragraph, idx) => (
                   <p
                     key={idx}
-                    style={{
-                      fontSize: "14px",
-                      color: "#475569",
-                      lineHeight: 1.6,
-                      margin: idx === 0 ? "0 0 8px 0" : "8px 0",
-                      fontStyle: paragraph.startsWith("*") ? "italic" : "normal",
-                    }}
+                    className={paragraph.startsWith("*") ? "italic" : ""}
                   >
                     {paragraph}
                   </p>
                 ))}
               </div>
 
-              {/* Section 3: Action */}
-              <div className="event-card-action">
-                <button
-                  type="button"
-                  className="event-card-btn"
-                  onClick={() => handleSelectEventType(eventType.id)}
-                  style={{
-                    background: eventType.accent,
-                    boxShadow: `0 2px 8px ${eventType.accent}30`,
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = eventType.accentHover;
-                    e.currentTarget.style.boxShadow = `0 4px 14px ${eventType.accent}40`;
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = eventType.accent;
-                    e.currentTarget.style.boxShadow = `0 2px 8px ${eventType.accent}30`;
-                  }}
-                >
-                  Create New Event →
-                </button>
-              </div>
+              <button
+                type="button"
+                className="event-modal-btn"
+                onClick={() => handleSelectEventType(selectedEvent.id)}
+                style={{
+                  background: selectedEvent.accent,
+                  boxShadow: `0 4px 14px ${selectedEvent.accent}40`,
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = selectedEvent.accentHover;
+                  e.currentTarget.style.boxShadow = `0 6px 18px ${selectedEvent.accent}50`;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = selectedEvent.accent;
+                  e.currentTarget.style.boxShadow = `0 4px 14px ${selectedEvent.accent}40`;
+                }}
+              >
+                Create New Event →
+              </button>
             </div>
-          ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
